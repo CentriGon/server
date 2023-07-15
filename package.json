@@ -8,5 +8,8 @@
   },
   "scripts": {
     "nodem": "nodemon index.js"
+  },
+  "engines": {
+    "node": "18.16.1"
   }
 }
