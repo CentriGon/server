@@ -7,6 +7,12 @@ const puppeteer = require("puppeteer")
 const { Server } = require("socket.io")
 
 app.use(cors)
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', 'https://saint-leads.web.app');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+});
 const server = http.createServer(app)
 
 const io = new Server(server, {
