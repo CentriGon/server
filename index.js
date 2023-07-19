@@ -27,19 +27,47 @@ io.on("connection", (socket) => {
     let num = 0;
 
     let keepRunning = true;
+    let currentCost = 0;
 
     socket.on("start_search", (shouldSearch) => {
 
         num = 0;
         keepRunning = true;
-        start();
+        console.log("Emails: " + shouldSearch.emailsIf + "\nContacts: " + shouldSearch.contactsIf)
+        try {
+            start();
+        }
+        catch (error) {
+            io.emit("error", {error})
+        }
+
+
 
         async function start() {
+            currentCost = 0;
             const browser = await puppeteer.launch({headless: true});
             const page = await browser.newPage();
+
+            let City = shouldSearch.location
           
-            const City = "alexandria virginia";
-            const url = `https://www.google.com/search?tbs=lf:1,lf_ui:14&tbm=lcl&q=local+roofers+in+${City}`;
+            let string = "local " + shouldSearch.businessType + " in " + shouldSearch.location
+            let splitString = string.split(" ");
+            let url = "";
+            for (let i = 0; i < splitString.length; i++) {
+                if (splitString[i] == "&") {
+                    splitString[i] = "%26"
+                }
+        
+                if (i != 0) {
+                    
+                    url += "+" + splitString[i]
+                }
+                else {
+                    url += splitString[i]
+                }
+            }
+            
+            url = `https://www.google.com/search?tbs=lf:1,lf_ui:14&tbm=lcl&q=${url}`;
             await page.goto(url);
           
             let businesses = await page.$$(".vwVdIc");
@@ -49,13 +77,11 @@ io.on("connection", (socket) => {
             
           
             let numPages = pages.length;
-            console.log(numPages)
             try {
                 for (let i = 0; i < numPages; i++) {
                     
                     if (keepRunning) {
-                        console.log("here");
-                        await lookAtBusinessInPage(page, businesses, browser);
+                        await lookAtBusinessInPage(page, businesses, browser, City);
                         pages = await page.$$('.fl');
                         await pages[i].click();
                         await new Promise((resolve) => setTimeout(resolve, 5000))
@@ -66,30 +92,78 @@ io.on("connection", (socket) => {
             catch (error) {
                 console.log(error)
             }
-            console.log("closing")
+            io.emit("closing")
             browser.close()
           
             
         };
           
-        async function lookAtBusinessInPage(page, businesses, browser) {
+        async function lookAtBusinessInPage(page, businesses, browser, City) {
             // await new Promise((resolve) => setTimeout(resolve, 5000));
-        
+
                 let previousBusiness = "";
         
                 for (let i = 0; i < businesses.length; i++) {
                     if (keepRunning) {
+                        
                         let purpose = "";
                         let phoneNumber = "";
                         let businessName = "";
                         let websiteLink = "";
                         let address = "";
-                        let emails = "";
-                        let contactInfo = "";
+                        let emails = null;
+                        let contactInfo = null;
             
                         await businesses[i].click();
                         await page.waitForTimeout(2000);
             
+                        
+                        console.log("here")
+                        try {
+                            let bizNameElement = await page.waitForSelector('.qrShPb', { timeout: 5000 });
+                            let bizName = await bizNameElement.$('span');
+                            businessName = await bizName.evaluate(element => element.textContent);
+                        } catch (error) {
+                            businessName = "No Business name found";
+                        }
+
+                        if (shouldSearch.contactsIf) {
+                            try {
+                                contactInfo = await searchForContactInformation(businessName, shouldSearch.location);
+                            }
+                            catch (error) {
+                                contactInfo = null;
+                                continue;
+                            }
+                            if (contactInfo != null) {
+                                currentCost += 5;
+                            }
+                            else {
+                                continue;
+                            }
+                        }
+                        
+                        
+
+                        if (shouldSearch.emailsIf) {
+                            try {
+                                emails = await searchForEmails({businessName, City}, browser);
+                            }
+                            catch (error) {
+                                emails = null;
+                                continue;
+                            }
+                            if (emails != null) {
+                                currentCost += 5;
+                            }
+                            else {
+                                continue;
+                            }
+                        }
+                        
+                        
+                        
+                        
                         try {
                             let phoneNumberElement = await page.waitForSelector('.zdqRlf', { timeout: 5000 }).catch(() => {});
                             let number = await phoneNumberElement.$('a');
@@ -106,13 +180,7 @@ io.on("connection", (socket) => {
                             phoneNumber = "No phone num found";
                         }
             
-                        try {
-                            let bizNameElement = await page.waitForSelector('.qrShPb', { timeout: 5000 });
-                            let bizName = await bizNameElement.$('span');
-                            businessName = await bizName.evaluate(element => element.textContent);
-                        } catch (error) {
-                            businessName = "No Business name found";
-                        }
+                        
             
                         try {
                             let websiteElement = await page.waitForSelector('.mI8Pwc', { timeout: 5000 });
@@ -136,32 +204,12 @@ io.on("connection", (socket) => {
                             console.log(error);
                             purpose = "No Industry found";
                         }
-                        console.log(businessName+ ", " + address + ", " + phoneNumber + ", " + websiteLink)
 
-                        try {
-                            if (shouldSearch.emailsIf) {
-                                if (websiteLink != null && websiteLink != "") {
-                                    console.log("emails")
-                                    emails = await searchForEmails(websiteLink, browser);
-                                }
-                            }
-                        }
-                        catch (error) {
-                            emails = null;
-                        }
-
-                        try {
-                            if (shouldSearch.contactsIf) {
-                                console.log("contacts")
-                                contactInfo = await searchForContactInformation(businessName, "Alexandria VA");
-                            }
-                        }
-                        catch (error) {
-                            contactInfo = null;
-                        }
+                        
                 
 
                         if (i < 1) {
+                            console.log("return")
                             const returnThing = {
                                 BusinessName: businessName,
                                 PhoneNumber: phoneNumber,
@@ -172,12 +220,12 @@ io.on("connection", (socket) => {
                                 Emails: emails,
                                 Info: contactInfo
                             }
-                            console.log("emitting")
-                            await socket.emit("business_info", returnThing)
+                            socket.emit("business_info", returnThing)
                             } else {
                             if (previousBusiness == businessName) {
                                 let e = "nothing";
                             } else {
+                                console.log("return")
                                 const returnThing = {
                                     BusinessName: businessName,
                                     PhoneNumber: phoneNumber,
@@ -188,88 +236,73 @@ io.on("connection", (socket) => {
                                     Emails: emails,
                                     Info: contactInfo
                                 }
-                                console.log("emitting")
-                                await socket.emit("business_info", returnThing)
+                            await socket.emit("business_info", returnThing)
                             }
                             
                         }
+                        currentCost += 3;
+                        console.log(currentCost)
                         
+                        if (currentCost >= shouldSearch.searchCost) {
+                            keepRunning = false;
+                            console.log("number close")
+                        }
                         previousBusiness = businessName;
                     }
                 }
         }
         
-        async function searchForEmails(url, browser) {
+        async function searchForEmails(object, browser) {
             const page = await browser.newPage();
-        
-            let returnArray = []
+
+            let string = object.businessName + " " + object.City;
+            let splitString = string.split(" ")
             
+            let url = ""
+
+            for (let i = 0; i < splitString.length; i++) {
+                if (splitString[i] == "&") {
+                    splitString[i] = "%26"
+                }
+
+                if (i != 0) {
+                    
+                    url += "+" + splitString[i]
+                }
+                else {
+                    url += splitString[i]
+                }
+            }
+
+            url += "+facebook"
+
             try {
-                await page.goto(url);
+                await page.goto("https://www.google.com/search?q=" + url);
             } catch (error) {
                 console.error('Failed to navigate:', error);
                 await browser.close();
                 return;
             }
-            
-            let textContent = await page.evaluate(() => document.body.textContent);
-            let words = textContent.split(/\s+|["':]/); // Split by whitespace characters
-            
-            const emailRegex = /\S+@\S+\.\S+/;
-            let matchedEmails = words.filter((word) => !/\n/.test(word) && emailRegex.test(word) && word.length <= 200);
-        
-            for (const email of matchedEmails) {
-                returnArray.push(email)
-            }
-        
-            let emails = "";
+
             try {
-                let aS = await page.$$("a")
-                for (let i = 0; i < aS.length; i++) {
-                    const href = await aS[i].getProperty("href")
-                    const hrefValue = await href.jsonValue();
-                    if (hrefValue.includes("contact")) {
-                        const button = aS[i];
-                        let cond = true;
-                        await button.click().then(() => {
-                            cond = false;
-                        }).catch(() => {
-                            cond = true;
-                        })
-                        if (cond) {
-                            continue;
-                        }
-                        else {
-                            break;
-                        }
-                    }
-                }
-                
-                // await new Promise((resolve) => setTimeout(resolve, 2000));
-        
-                textContent = await page.evaluate(() => document.body.textContent);
-                // Split by whitespace characters
-                words = textContent.split(/\s+|["':]/);
-        
-                matchedEmails = words.filter((word) => !/\n/.test(word) && emailRegex.test(word) && word.length <= 200);
-        
-                for (const email of matchedEmails) {
-                    if (!email.includes("http")) {
-                        returnArray.push(email)
-                    }
-                }
-                
-                for (let email of returnArray) {
-                    emails += email + ", ";
-                }
+            let button = await page.$(".DKV0Md")
+            await button.click()
+
+            await new Promise((resolve) => setTimeout(resolve, 3000)); 
+
+            let x = await page.$x(`//*[@aria-label='Close']`);;
+            await x[0].click()
+
+            let textBox = await page.$x("//span[contains(text(), '.') and contains(text(), '@')]");
+            let textContent = await page.evaluate((item) => item.textContent, textBox[0]);
+
+            await page.close()
+            return textContent;
             }
-            catch(error) {
-                page.close()
-                return ""
+            catch (error) {
+                await page.close();
+                return null;
             }
-            
-            page.close()
-            return emails;
         }
         
         function formatReviews(text) {
@@ -315,7 +348,7 @@ io.on("connection", (socket) => {
         
             url += "+BBB"
         
-            let text = "None Found"
+            let text = null;
             
             try {
                 await page.goto(url)
@@ -333,12 +366,12 @@ io.on("connection", (socket) => {
                     }
                 }
         
-                const dd = await page.waitForXPath("//dt[contains(text(), 'Contact Information')]/following-sibling::*[1]", { timeout: 10000 });
+                const dd = await page.waitForXPath("//dt[contains(text(), 'Contact Information')]/following-sibling::*[1]", { timeout: 4000 });
                 text = await dd.evaluate(el => el.textContent);
                 }
             catch(error) {
                 await browser.close()
-                return "None Found"
+                return null;
             }
         
             await browser.close()
@@ -348,7 +381,7 @@ io.on("connection", (socket) => {
 
     socket.on("stop_running", () => {
         keepRunning = false;
-        console.log("trying close")
+        io.emit("trying_close")
     })
 }) 
 
