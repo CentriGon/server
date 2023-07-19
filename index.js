@@ -18,7 +18,7 @@ const server = http.createServer(app)
 const io = new Server(server, {
     cors: {
         origin: "*",
-        methods: ["GET", "POST"]
+        methods: ["GET", "POST", "*"]
     }
 })
 
@@ -141,9 +141,7 @@ io.on("connection", (socket) => {
                             else {
                                 continue;
                             }
-                        }
-                        
-                        
+                        }                
 
                         if (shouldSearch.emailsIf) {
                             try {
@@ -160,9 +158,6 @@ io.on("connection", (socket) => {
                                 continue;
                             }
                         }
-                        
-                        
-                        
                         
                         try {
                             let phoneNumberElement = await page.waitForSelector('.zdqRlf', { timeout: 5000 }).catch(() => {});
